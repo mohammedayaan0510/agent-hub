@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@stripe/stripe-js": "^10.1.0",
+    "stripe": "^23.0.0"
+  }
+}
