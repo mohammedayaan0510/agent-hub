@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "cd marketplace-web && npm run build",
+  "outputDirectory": "marketplace-web/.next",
+  "installCommand": "cd marketplace-web && npm install"
+}
