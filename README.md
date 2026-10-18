@@ -147,11 +147,6 @@ Contributions are welcome once the repository's contribution workflow is establi
 4. Add or update tests where appropriate.
 5. Submit a pull request with a clear description.
 
-## 📄 License
-
-A license has not been specified yet. Add a `LICENSE` file to the repository and update this section before distributing the project.
-
 ---
-
 **Built to make AI agent access, execution, and monetization simpler.**
   
