@@ -1,57 +1,89 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
-function getSupabaseClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  
-  // Prefers Service Role Key for elevated backend tasks, falls back to Anon Key
-  const supabaseKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl) {
-    throw new Error('Missing Supabase URL in environment variables.');
-  }
-
-  if (!supabaseKey) {
-    throw new Error('Missing Supabase Key (Service Role or Anon) in environment variables.');
-  }
-
-  return createClient(supabaseUrl, supabaseKey);
-}
-
-// GET /api/keys?buyer_id=...
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   try {
-    const supabase = getSupabaseClient();
-    const { searchParams } = new URL(request.url);
-    const buyerId = searchParams.get('buyer_id');
+    const cookieStore = await cookies();
 
-    if (!buyerId) {
+    // 1. Initialize Supabase SSR Client
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              );
+            } catch {
+              // The `setAll` method was called from a Server Component / Route Handler.
+              // This can be ignored if you have middleware refreshing user sessions.
+            }
+          },
+        },
+      }
+    );
+
+    // 2. Authenticate the active user session
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
       return NextResponse.json(
-        { error: 'Missing buyer_id parameter', keys: [] },
-        { status: 400 }
+        { error: "Unauthorized. Please sign in to create an API key." },
+        { status: 401 }
       );
     }
 
+    // 3. Extract request body options
+    const body = await request.json().catch(() => ({}));
+    const keyName = body.key_name || "Default API Key";
+
+    // 4. Generate raw API key and calculate SHA-256 hash
+    const rawKey = `ag_live_${crypto.randomUUID().replace(/-/g, "")}`;
+    const encoder = new TextEncoder();
+    const hashBuffer = await crypto.subtle.digest(
+      "SHA-256",
+      encoder.encode(rawKey)
+    );
+    const keyHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    // 5. Store key metadata in database
     const { data, error } = await supabase
-      .from('api_keys')
-      .select('id, name, key_prefix, is_active, created_at, last_used_at')
-      .eq('buyer_id', buyerId)
-      .order('created_at', { ascending: false });
+      .from("api_keys")
+      .insert({
+        buyer_id: user.id,
+        key_name: keyName,
+        key_hash: keyHash,
+        is_active: true,
+      })
+      .select()
+      .single();
 
     if (error) {
-      console.error('Supabase query error:', error.message);
-      return NextResponse.json({ error: error.message, keys: [] }, { status: 500 });
+      console.error("Supabase Database Error:", error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ keys: data || [] }, { status: 200 });
+    // 6. Return raw key once to the client
+    return NextResponse.json({
+      success: true,
+      apiKey: rawKey,
+      keyRecord: data,
+    });
   } catch (err: any) {
-    console.error('GET /api/keys server error:', err.message);
+    console.error("API Key Endpoint Failure:", err);
     return NextResponse.json(
-      { error: err.message || 'Internal Server Error', keys: [] },
+      { error: err.message || "Internal server error." },
       { status: 500 }
     );
   }
