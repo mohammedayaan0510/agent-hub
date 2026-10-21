@@ -1,375 +1,258 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { 
-  Key, Plus, Copy, Check, Trash2, Power, AlertTriangle, 
-  ShieldCheck, Code2, CheckCircle2, X 
-} from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { createBrowserClient } from '@supabase/ssr';
+import { Key, Plus, Trash2, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
 
 interface ApiKeyItem {
   id: string;
-  name: string;
+  key_name: string;
   key_prefix: string;
-  is_active: boolean;
   created_at: string;
-  last_used_at: string | null;
 }
 
-export default function ApiKeysPage() {
-  const [buyerId] = useState('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11');
+export default function KeysPage() {
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [keyName, setKeyName] = useState('');
+  const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [newRawKey, setNewRawKey] = useState<string | null>(null);
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  // Toast notification state
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
-  // Quick-start code snippet generator state
-  const [activeTab, setActiveTab] = useState<'curl' | 'python' | 'node'>('curl');
-  const [selectedAgentId] = useState('YOUR_AGENT_ID');
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+  const generateHash = async (text: string): Promise<string> => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
   };
 
-  const fetchKeys = async () => {
+  const fetchKeys = useCallback(async () => {
     setLoading(true);
-    try {
-      const res = await fetch(`/api/keys?buyer_id=${buyerId}`);
+    setErrorMsg('');
 
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '');
-        console.error(`API Error (${res.status} ${res.statusText}):`, errBody);
-        setKeys([]);
-        return;
-      }
+    const { data: { user } } = await supabase.auth.getUser();
 
-      const data = await res.json();
-      if (data.keys) {
-        setKeys(data.keys);
-      }
-    } catch (err) {
-      console.error('Failed to fetch API keys:', err);
-    } finally {
+    if (!user) {
+      setKeys([]);
       setLoading(false);
+      return;
     }
-  };
+
+    const { data, error } = await supabase
+      .from('api_keys')
+      .select('id, key_name, key_prefix, created_at')
+      .eq('buyer_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      setErrorMsg(error.message);
+    } else {
+      setKeys(data || []);
+    }
+
+    setLoading(false);
+  }, [supabase]);
 
   useEffect(() => {
     fetchKeys();
-  }, []);
+  }, [fetchKeys]);
 
   const handleCreateKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!keyName.trim()) return;
 
     setCreating(true);
-    try {
-      const res = await fetch('/api/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buyer_id: buyerId, name: keyName }),
-      });
+    setErrorMsg('');
+    setNewlyCreatedKey(null);
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        alert(errData.error || 'Failed to create key');
-        return;
-      }
+    const { data: { user } } = await supabase.auth.getUser();
 
-      const data = await res.json();
-      if (data.raw_key) {
-        setNewRawKey(data.raw_key);
-        setKeyName('');
+    const generatedKey = `ah_live_${crypto.randomUUID().replace(/-/g, '')}`;
+    const keyPrefix = generatedKey.substring(0, 12);
+    const keyHash = await generateHash(generatedKey);
+
+    const payload: Record<string, unknown> = {
+      key_name: keyName.trim(),
+      key_prefix: keyPrefix,
+      api_key: generatedKey,
+      key_hash: keyHash,
+    };
+
+    if (user?.id) {
+      payload.buyer_id = user.id;
+    }
+
+    const { data, error } = await supabase
+      .from('api_keys')
+      .insert([payload])
+      .select('id, key_name, key_prefix, created_at')
+      .single();
+
+    setCreating(false);
+
+    if (error) {
+      setErrorMsg(error.message);
+    } else {
+      setNewlyCreatedKey(generatedKey);
+      setKeyName('');
+      if (data) {
+        setKeys((prev) => [data, ...prev]);
+      } else {
         fetchKeys();
-        showToast('New API key generated successfully!');
       }
-    } catch (err) {
-      console.error('Error creating key:', err);
-    } finally {
-      setCreating(false);
     }
   };
 
-  const toggleKeyStatus = async (keyId: string, currentStatus: boolean) => {
-    try {
-      const res = await fetch('/api/keys', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key_id: keyId, is_active: !currentStatus }),
-      });
-
-      if (res.ok) {
-        setKeys(keys.map((k) => (k.id === keyId ? { ...k, is_active: !currentStatus } : k)));
-        showToast(currentStatus ? 'API Key revoked' : 'API Key activated');
-      }
-    } catch (err) {
-      console.error('Failed to toggle key:', err);
+  const handleDeleteKey = async (id: string) => {
+    const { error } = await supabase.from('api_keys').delete().eq('id', id);
+    if (error) {
+      setErrorMsg(error.message);
+    } else {
+      setKeys((prev) => prev.filter((k) => k.id !== id));
     }
   };
 
-  const deleteKey = async (keyId: string) => {
-    if (!confirm('Are you sure you want to delete this API key? Any integration using it will stop working.')) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/keys?key_id=${keyId}`, { method: 'DELETE' });
-      if (res.ok) {
-        setKeys(keys.filter((k) => k.id !== keyId));
-        showToast('API Key permanently deleted');
-      }
-    } catch (err) {
-      console.error('Failed to delete key:', err);
-    }
-  };
-
-  const copyText = (text: string, label: string) => {
+  const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
-    showToast(`Copied ${label} to clipboard!`);
-  };
-
-  const activeKeyForSnippet = newRawKey || 'ag_live_YOUR_API_KEY';
-
-  const getSnippet = () => {
-    if (activeTab === 'curl') {
-      return `curl.exe -X POST "http://localhost:8000/v1/proxy/${selectedAgentId}" \\
-  -H "Authorization: Bearer ${activeKeyForSnippet}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"prompt": "Hello from AgentHub buyer test!"}'`;
-    }
-    if (activeTab === 'python') {
-      return `import httpx
-
-url = "http://localhost:8000/v1/proxy/${selectedAgentId}"
-headers = {
-    "Authorization": "Bearer ${activeKeyForSnippet}",
-    "Content-Type": "application/json"
-}
-payload = {"prompt": "Hello from AgentHub buyer test!"}
-
-response = httpx.post(url, headers=headers, json=payload)
-print(response.json())`;
-    }
-    return `const response = await fetch('http://localhost:8000/v1/proxy/${selectedAgentId}', {
-  method: 'POST',
-  headers: {
-    'Authorization': 'Bearer ${activeKeyForSnippet}',
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({ prompt: 'Hello from AgentHub buyer test!' }),
-});
-
-const data = await response.json();
-console.log(data);`;
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10 text-zinc-900 dark:text-zinc-100 relative">
-      {/* Floating Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 text-xs font-semibold rounded-2xl shadow-2xl border border-zinc-800 dark:border-zinc-200 animate-in fade-in slide-in-from-bottom-4 duration-200">
-          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          <span>{toastMessage}</span>
-          <button onClick={() => setToastMessage(null)} className="ml-2 text-zinc-400 hover:text-white dark:hover:text-zinc-900">
-            <X className="w-3.5 h-3.5" />
-          </button>
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md">
+          <Key className="w-5 h-5" />
         </div>
-      )}
-
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Key className="w-6 h-6 text-indigo-500" />
-            API Key Management
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+            API Keys
           </h1>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
-            Generate and manage SHA-256 hashed keys for calling AI agents via Gateway Proxy (`:8000`).
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Manage developer keys to authenticate AgentHub API requests
           </p>
         </div>
       </div>
 
-      {/* Secret Key Banner Modal */}
-      {newRawKey && (
-        <div className="mb-8 p-5 bg-amber-500/10 border border-amber-500/30 rounded-2xl animate-in fade-in duration-200">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-            <div className="w-full">
-              <h3 className="font-semibold text-amber-500 text-sm">Save your secret API Key!</h3>
-              <p className="text-xs text-zinc-600 dark:text-zinc-300 mt-1">
-                For security reasons, this key will <strong>never be shown again</strong>.
-              </p>
-              <div className="mt-3 flex items-center gap-2 bg-zinc-950 text-zinc-100 font-mono text-xs p-3 rounded-xl border border-zinc-800">
-                <span className="truncate flex-1 font-medium">{newRawKey}</span>
-                <button
-                  type="button"
-                  onClick={() => copyText(newRawKey, 'API Key')}
-                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center gap-1 text-xs transition"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy Key</span>
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setNewRawKey(null)}
-                className="mt-3 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline"
-              >
-                I have saved this key securely
-              </button>
-            </div>
-          </div>
+      {errorMsg && (
+        <div className="p-4 mb-6 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* Create Key Form */}
-      <form onSubmit={handleCreateKey} className="mb-8 p-4 bg-white dark:bg-zinc-900/60 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 flex flex-col sm:flex-row gap-3 shadow-sm">
-        <input
-          type="text"
-          placeholder="Key Label (e.g. Production Backend, Local Dev)"
-          value={keyName}
-          onChange={(e) => setKeyName(e.target.value)}
-          required
-          className="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-        />
-        <button
-          type="submit"
-          disabled={creating}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 shrink-0 shadow-md shadow-indigo-500/20"
-        >
-          <Plus className="w-4 h-4" />
-          {creating ? 'Generating...' : 'Generate Key'}
-        </button>
-      </form>
+      <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm mb-8">
+        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-3">
+          Create New Key
+        </h2>
+        <form onSubmit={handleCreateKey} className="flex flex-col sm:flex-row gap-3">
+          <input
+            type="text"
+            placeholder="Key Name (e.g. Local Dev)"
+            value={keyName}
+            onChange={(e) => setKeyName(e.target.value)}
+            className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+            required
+          />
+          <button
+            type="submit"
+            disabled={creating || !keyName.trim()}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl transition shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {creating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                Create Key
+              </>
+            )}
+          </button>
+        </form>
 
-      {/* Keys Table / Skeletal Loader */}
-      <div className="mb-10 border border-zinc-200 dark:border-zinc-800/80 rounded-2xl overflow-hidden bg-white dark:bg-zinc-900/40 shadow-sm">
-        <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-          <h2 className="text-sm font-bold flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            Active Credentials ({keys.length})
-          </h2>
-        </div>
-
-        {loading ? (
-          <div className="p-6 space-y-4">
-            {[1, 2, 3].map((n) => (
-              <div key={n} className="h-12 bg-zinc-100 dark:bg-zinc-800/40 rounded-xl animate-pulse" />
-            ))}
-          </div>
-        ) : keys.length === 0 ? (
-          <div className="p-12 text-center text-sm text-zinc-500">
-            No API keys created yet. Generate one above to access the gateway proxy.
-          </div>
-        ) : (
-          <div className="divide-y divide-zinc-200 dark:divide-zinc-800/80">
-            {keys.map((k) => (
-              <div key={k.id} className="p-4 sm:px-6 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm">{k.name}</span>
-                    {k.is_active ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                        <CheckCircle2 className="w-3 h-3" /> Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-semibold bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
-                        Revoked
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-zinc-500 font-mono mt-1">
-                    {k.key_prefix}••••••••••••••••••••••••
-                  </div>
-                  <div className="text-[11px] text-zinc-400 mt-1">
-                    Created: {new Date(k.created_at).toLocaleDateString()}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleKeyStatus(k.id, k.is_active)}
-                    title={k.is_active ? 'Revoke Key' : 'Activate Key'}
-                    className={`p-2 rounded-xl border transition ${
-                      k.is_active
-                        ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100'
-                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:bg-zinc-200'
-                    }`}
-                  >
-                    <Power className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => deleteKey(k.id)}
-                    title="Delete Key"
-                    className="p-2 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-100 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
+        {newlyCreatedKey && (
+          <div className="mt-4 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+            <p className="text-xs font-semibold mb-1">
+              Key created successfully! Make sure to copy it now.
+            </p>
+            <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-2.5 rounded-lg border border-emerald-500/30 text-xs font-mono text-zinc-900 dark:text-zinc-100 mt-2">
+              <span className="truncate mr-2">{newlyCreatedKey}</span>
+              <button
+                type="button"
+                onClick={() => handleCopy(newlyCreatedKey, 'new_key')}
+                className="px-2.5 py-1 bg-emerald-600 text-white rounded-md hover:bg-emerald-500 transition flex items-center gap-1 shrink-0 font-sans text-xs"
+              >
+                {copiedId === 'new_key' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" /> Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" /> Copy Key
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Integration Code Snippets */}
-      <div className="p-6 bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800/80 rounded-2xl shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-base font-bold flex items-center gap-2">
-              <Code2 className="w-5 h-5 text-indigo-500" />
-              Quick-Start Integration Snippet
-            </h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Copy-paste execution calls directly into your frontend or backend application code.
-            </p>
-          </div>
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-3">
+          Your Active Keys
+        </h2>
 
-          <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl self-start sm:self-auto">
-            <button
-              onClick={() => setActiveTab('curl')}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'curl' ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-zinc-500'
-              }`}
-            >
-              cURL
-            </button>
-            <button
-              onClick={() => setActiveTab('python')}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'python' ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-zinc-500'
-              }`}
-            >
-              Python
-            </button>
-            <button
-              onClick={() => setActiveTab('node')}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'node' ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-zinc-500'
-              }`}
-            >
-              Node.js
-            </button>
+        {loading ? (
+          <div className="p-8 text-center text-zinc-500 dark:text-zinc-400 flex items-center justify-center gap-2">
+            <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+            Loading keys...
           </div>
-        </div>
+        ) : keys.length === 0 ? (
+          <div className="p-8 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 text-sm">
+            No API keys found. Create one above to get started.
+          </div>
+        ) : (
+          keys.map((key) => (
+            <div
+              key={key.id}
+              className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex items-center justify-between gap-4"
+            >
+              <div>
+                <h3 className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+                  {key.key_name}
+                </h3>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                    {key.key_prefix || 'ah_live_'}••••••••
+                  </span>
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                    Created {new Date(key.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
 
-        <div className="relative bg-zinc-950 text-zinc-100 font-mono text-xs p-4 rounded-xl border border-zinc-800 overflow-x-auto">
-          <button
-            onClick={() => copyText(getSnippet(), 'Code Snippet')}
-            className="absolute top-3 right-3 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg flex items-center gap-1.5 text-xs transition border border-zinc-700 font-sans font-medium"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            <span>Copy Snippet</span>
-          </button>
-          <pre className="pr-28 whitespace-pre-wrap leading-relaxed">{getSnippet()}</pre>
-        </div>
+              <button
+                type="button"
+                onClick={() => handleDeleteKey(key.id)}
+                className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition"
+                title="Revoke key"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import {
   Key, Activity, DollarSign, Store, Sparkles, 
   CreditCard, Home, Sun, Moon 
 } from 'lucide-react';
+import AuthButton from './AuthButton';
 
 export function Navbar() {
   const pathname = usePathname();
@@ -38,7 +39,7 @@ export function Navbar() {
           <span>AgentHub</span>
         </Link>
 
-        {/* Navigation Links + Theme Switcher */}
+        {/* Navigation Links + Theme Switcher + Auth Button */}
         <div className="flex items-center gap-2 sm:gap-4">
           <nav className="flex items-center gap-1 sm:gap-2">
             {navLinks.map((link) => {
@@ -71,8 +72,13 @@ export function Navbar() {
               {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-600" />}
             </button>
           )}
+
+          {/* Clean Auth Button Integration */}
+          <AuthButton />
         </div>
       </div>
     </header>
   );
 }
+
+export default Navbar;

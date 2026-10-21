@@ -1,28 +1,25 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import Navbar from '@/components/Navbar';
+import { Providers } from '@/components/Providers';
 import './globals.css';
-import { ThemeProvider } from '@/components/ThemeProvider';
-import { Navbar } from '@/components/Navbar';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'AgentHub | AI Agent Marketplace',
-  description: 'Monetize AI agents and execute API endpoints via Gateway Proxy.',
+  title: 'AgentHub',
+  description: 'AI Agent API Marketplace',
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 min-h-screen flex flex-col antialiased`}>
-        <ThemeProvider>
+      <body className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 antialiased">
+        <Providers>
           <Navbar />
-          <main className="flex-1">{children}</main>
-        </ThemeProvider>
+          <main>{children}</main>
+        </Providers>
       </body>
     </html>
   );
