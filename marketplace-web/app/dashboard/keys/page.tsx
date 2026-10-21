@@ -19,8 +19,8 @@ export default function KeysPage() {
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
-  
-  // Test key states
+
+  // Inline test states
   const [testingKey, setTestingKey] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -121,7 +121,8 @@ export default function KeysPage() {
     setTestResult(null);
 
     try {
-      const res = await fetch('/api/v1/test-key', {
+      const endpoint = `${window.location.origin}/api/v1/test-key`;
+      const res = await fetch(endpoint, {
         method: 'GET',
         headers: {
           'x-api-key': secretKey,
@@ -141,10 +142,11 @@ export default function KeysPage() {
           message: data.error || 'Authentication failed.',
         });
       }
-    } catch {
+    } catch (err: unknown) {
+      const errorDetail = err instanceof Error ? err.message : 'Unknown network error';
       setTestResult({
         success: false,
-        message: 'Failed to reach API validation endpoint.',
+        message: `Failed to reach API validation endpoint: ${errorDetail}`,
       });
     } finally {
       setTestingKey(false);
