@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { Key, Plus, Trash2, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, AlertCircle, Loader2, Play } from 'lucide-react';
 
 interface ApiKeyItem {
   id: string;
@@ -19,6 +19,10 @@ export default function KeysPage() {
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  
+  // Test key states
+  const [testingKey, setTestingKey] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,6 +76,7 @@ export default function KeysPage() {
     setCreating(true);
     setErrorMsg('');
     setNewlyCreatedKey(null);
+    setTestResult(null);
 
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -108,6 +113,41 @@ export default function KeysPage() {
       } else {
         fetchKeys();
       }
+    }
+  };
+
+  const handleTestKey = async (secretKey: string) => {
+    setTestingKey(true);
+    setTestResult(null);
+
+    try {
+      const res = await fetch('/api/v1/test-key', {
+        method: 'GET',
+        headers: {
+          'x-api-key': secretKey,
+        },
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setTestResult({
+          success: true,
+          message: `Success! Authenticated key for "${data.key_info.key_name}" (ID: ${data.key_info.key_id})`,
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: data.error || 'Authentication failed.',
+        });
+      }
+    } catch {
+      setTestResult({
+        success: false,
+        message: 'Failed to reach API validation endpoint.',
+      });
+    } finally {
+      setTestingKey(false);
     }
   };
 
@@ -184,26 +224,44 @@ export default function KeysPage() {
         {newlyCreatedKey && (
           <div className="mt-4 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300">
             <p className="text-xs font-semibold mb-1">
-              Key created successfully! Make sure to copy it now.
+              Key created successfully! Copy or test it now before navigating away.
             </p>
-            <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-2.5 rounded-lg border border-emerald-500/30 text-xs font-mono text-zinc-900 dark:text-zinc-100 mt-2">
-              <span className="truncate mr-2">{newlyCreatedKey}</span>
-              <button
-                type="button"
-                onClick={() => handleCopy(newlyCreatedKey, 'new_key')}
-                className="px-2.5 py-1 bg-emerald-600 text-white rounded-md hover:bg-emerald-500 transition flex items-center gap-1 shrink-0 font-sans text-xs"
-              >
-                {copiedId === 'new_key' ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" /> Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" /> Copy Key
-                  </>
-                )}
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-zinc-950 p-2.5 rounded-lg border border-emerald-500/30 text-xs font-mono text-zinc-900 dark:text-zinc-100 mt-2">
+              <span className="truncate flex-1 font-mono select-all">{newlyCreatedKey}</span>
+              
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(newlyCreatedKey, 'new_key')}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition flex items-center gap-1.5 font-sans text-xs font-medium shadow-sm"
+                >
+                  {copiedId === 'new_key' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedId === 'new_key' ? 'Copied!' : 'Copy Key'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleTestKey(newlyCreatedKey)}
+                  disabled={testingKey}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition flex items-center gap-1.5 font-sans text-xs font-medium shadow-sm disabled:opacity-50"
+                >
+                  {testingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  Test Key
+                </button>
+              </div>
             </div>
+
+            {testResult && (
+              <div
+                className={`mt-2 p-2.5 rounded-lg text-xs font-mono border ${
+                  testResult.success
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
+                    : 'bg-red-500/20 border-red-500/40 text-red-900 dark:text-red-200'
+                }`}
+              >
+                {testResult.message}
+              </div>
+            )}
           </div>
         )}
       </div>
