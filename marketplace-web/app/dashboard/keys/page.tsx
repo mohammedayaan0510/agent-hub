@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { Key, Plus, Trash2, Copy, Check, AlertCircle, Loader2, Play } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, AlertCircle, Loader2, Play, ShieldAlert } from 'lucide-react';
 
 interface ApiKeyItem {
   id: string;
@@ -31,7 +31,7 @@ export default function KeysPage() {
 
   const generateHash = async (text: string): Promise<string> => {
     const encoder = new TextEncoder();
-    const data = encoder.encode(text);
+    const data = encoder.encode(text.trim());
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     return Array.from(new Uint8Array(hashBuffer))
       .map((b) => b.toString(16).padStart(2, '0'))
@@ -225,9 +225,10 @@ export default function KeysPage() {
 
         {newlyCreatedKey && (
           <div className="mt-4 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300">
-            <p className="text-xs font-semibold mb-1">
-              Key created successfully! Copy or test it now before navigating away.
-            </p>
+            <div className="flex items-center gap-1.5 text-xs font-semibold mb-1">
+              <ShieldAlert className="w-4 h-4 text-emerald-600" />
+              <span>Copy or test your API key now! For security reasons, full secret keys cannot be displayed again after leaving this page.</span>
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-zinc-950 p-2.5 rounded-lg border border-emerald-500/30 text-xs font-mono text-zinc-900 dark:text-zinc-100 mt-2">
               <span className="truncate flex-1 font-mono select-all">{newlyCreatedKey}</span>
               
@@ -238,7 +239,7 @@ export default function KeysPage() {
                   className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition flex items-center gap-1.5 font-sans text-xs font-medium shadow-sm"
                 >
                   {copiedId === 'new_key' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copiedId === 'new_key' ? 'Copied!' : 'Copy Key'}
+                  {copiedId === 'new_key' ? 'Copied!' : 'Copy Secret Key'}
                 </button>
 
                 <button
@@ -302,14 +303,26 @@ export default function KeysPage() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleDeleteKey(key.id)}
-                className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition"
-                title="Revoke key"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(key.key_prefix || 'ah_live_', key.id)}
+                  className="px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition flex items-center gap-1"
+                  title="Copy Key Prefix"
+                >
+                  {copiedId === key.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedId === key.id ? 'Copied Prefix' : 'Copy Prefix'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDeleteKey(key.id)}
+                  className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition"
+                  title="Revoke key"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))
         )}

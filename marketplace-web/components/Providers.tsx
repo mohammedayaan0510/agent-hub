@@ -1,7 +1,7 @@
 'use client';
 
 import { ThemeProvider as NextThemesProvider } from 'next-themes';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
@@ -10,8 +10,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     setMounted(true);
   }, []);
 
+  // Return raw children during SSR to prevent next-themes from injecting <script> on server
   if (!mounted) {
-    return <div suppressHydrationWarning>{children}</div>;
+    return <>{children}</>;
   }
 
   return (

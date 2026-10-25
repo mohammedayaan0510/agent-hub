@@ -3,12 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 async function hashApiKey(key: string): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(key);
+  const data = encoder.encode(key.trim());
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     .from('api_keys')
     .select('id, key_name, buyer_id, created_at')
     .eq('key_hash', keyHash)
-    .single();
+    .maybeSingle();
 
   if (error || !keyRecord) {
     return NextResponse.json(
